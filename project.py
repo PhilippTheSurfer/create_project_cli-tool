@@ -4,7 +4,7 @@ import os
 import subprocess
 import typer
 import time
-from typer import Optional
+from typing import Optional
 from typing_extensions import Annotated
 from pathlib import Path
 
@@ -29,12 +29,31 @@ def create_repo() -> str:
     return repo_name
 
 
+def get_current_path():
+    """
+    Returns the current working directory.
+    """
+    return os.getcwd()
+
+
 def init_git_repo() -> bool:
     # Initialize Git repository
     typer.secho("Initializing Git repository...", fg=typer.colors.YELLOW)
     try:
         subprocess.run(["git", "init"], check=True)
 
+    except subprocess.CalledProcessError:
+        typer.secho("Error: Failed to initialize Git repository.")
+        raise typer.Exit(code=1)
+
+    return True
+
+
+def add_python_gitignore() -> bool:
+
+    typer.secho("Add Python gitignore to repository")
+
+    try:
         gitignore_content = """\
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -200,13 +219,27 @@ cython_debug/
 """
         with open(".gitignore", "w") as f:
             f.write(gitignore_content)
-        typer.echo("Added Python .gitignore to the repo.")
+        typer.secho("Added Python .gitignore to the repo.")
 
     except subprocess.CalledProcessError:
-        typer.echo("Error: Failed to initialize Git repository.")
+        typer.secho("Error: Failed to merge gitignore.")
         raise typer.Exit(code=1)
 
     return True
+
+
+def to_lowercase(input_string) -> str:
+    """
+    Converts a string with mixed lower and uppercase letters to all lowercase.
+
+    Parameters:
+    input_string (str): The string to convert.
+
+    Returns:
+    str: The input string converted to lowercase.
+    """
+    return input_string.lower()
+
 
 
 app = typer.Typer(help="A CLI tool for setting up and managing projects.")
@@ -219,9 +252,11 @@ def fastapi():
     typer.secho("🚀 Welcome to the FastAPI Project Setup Tool! 🚀", fg=typer.colors.CYAN, bold=True)
 
     # setup repository
-    create_repo()
+    repo_name =  create_repo()
 
     init_git_repo()
+
+    add_python_gitignore()
 
     # Create virtual environment
     typer.secho("Creating virtual environment...", fg=typer.colors.YELLOW)
@@ -229,9 +264,9 @@ def fastapi():
     #subprocess.run(["bash", "-c", "source venv/bin/activate && echo 'Virtual environment activated.'"])
 
     # Create docker-compose.yml
-    compose_content = """\
+    compose_content = f"""\
 services:
-  api:
+  {repo_name}:
     build: ./src
     expose:
       - "8000"
@@ -240,13 +275,13 @@ services:
         ipv4_address: 172.20.20.90
       backend:
     restart: unless-stopped
-    container_name: api
+    container_name: {repo_name}
 
 networks:
   frontproxy_fnet:
     external: true
   backend:
-    name: api_backend
+    name: {repo_name}_backend
     driver: bridge
     driver_opts:
       com.docker.network.enable_ipv6: "false"
@@ -314,30 +349,32 @@ app = FastAPI()
     with open("tests/test_api.py", "w") as f:
         f.write("# Test cases for the FastAPI project")
 
-    typer.secho(f"✅ FastAPI project '{repo_name}' has been created at {full_path}.", fg=typer.colors.GREEN, bold=True)
+    typer.secho(f"✅ FastAPI project '{repo_name}' has been created successfully.", fg=typer.colors.GREEN, bold=True)
 
 
-@app.command(help="just for the help command")
-def angular(docker: Annotated[Optional[str], typer.Argument()] = None):
-    if docker is None:
-        
-        repo_name=create_repo()
-        init_git_repo()
-        
-        # Run `ng new` command
-        typer.echo("Running Angular CLI to initialize the project...")
-        try:
-            subprocess.run(["ng", "new", repo_name, "--directory", ".", "--defaults"], check=True)
-        except subprocess.CalledProcessError:
-            typer.echo("Error: Failed to create the Angular project using the Angular CLI.")
-            raise typer.Exit(code=1)
-        
-        typer.secho("Adding Docker Prod Setup.")
-        compose_content="""\
+@app.command(help="Setup Angular Project Structure")
+def angular(docker: bool = typer.Option(False, '--docker', help='Include Docker setup')):
+    repo_name=create_repo()
+    init_git_repo()
+
+    build_name=f"{repo_name}:latest"
+
+    build_name=to_lowercase(build_name)
+
+    # Run `ng new` command
+    typer.echo("Running Angular CLI to initialize the project...")
+    try:
+        subprocess.run(["ng", "new", repo_name, "--directory", ".", "--defaults"], check=True)
+    except subprocess.CalledProcessError:
+        typer.echo("Error: Failed to create the Angular project using the Angular CLI.")
+        raise typer.Exit(code=1)
+
+    typer.secho("Adding Docker Prod Setup.")
+    compose_content=f"""\
 services:
-  angular-project:
+  {repo_name}:
     build: ./src
-    container_name: angular-project
+    container_name: {repo_name}
     restart: unless-stopped
     networks:
       frontproxy_fnet:
@@ -352,16 +389,16 @@ networks:
   frontproxy_fnet:
     external: true
   backend:
-    name: angular-project_backend
+    name: {repo_name}_backend
     driver: bridge
     driver_opts:
       com.docker.network.enable_ipv6: "false"
 
 """
-        with open("docker-compose.yml", "w") as f:
-            f.write(compose_content)
+    with open("docker-compose.yml", "w") as f:
+        f.write(compose_content)
 
-        dockerfile_content = """\
+    dockerfile_content = f"""\
 # Stage 1: Compile and Build angular codebase
 FROM node:20.11.0-alpine as build
 
@@ -380,24 +417,24 @@ RUN npm install -g npm@10.4.0 && \
 # Stage 2: Serve app with nginx server
 FROM nginx:latest
 
-COPY --from=build /usr/local/app/dist/{angular-project-name}/browser /usr/share/nginx/html
+COPY --from=build /usr/local/app/dist/{build_name}/browser /usr/share/nginx/html
 
 EXPOSE 80
 """
-        with open("src/Dockerfile", "w") as f:
-            f.write(dockerfile_content)
+    with open("src/Dockerfile", "w") as f:
+        f.write(dockerfile_content)
 
-    else:
-        docker_dev_content="""\
+    if docker:
+        docker_dev_content=f"""\
 services:
-  anular-project:
-    image: anular-project:latest
+  {repo_name}:
+    image: {build_name}
     volumes:
-      - ./app:/usr/local/app
+      - ./:/usr/local/app
     ports:
       - "4200:4200"
-    command: ["npm install"]
-    container_name: anular-project
+#    command: ["npm install"]
+    container_name: {repo_name}
     restart: unless-stopped
     networks:
       frontproxy_fnet:
@@ -412,7 +449,7 @@ networks:
   frontproxy_fnet:
     external: true
   backend:
-    name: anular-project_backend
+    name: {repo_name}_backend
     driver: bridge
     driver_opts:
       com.docker.network.enable_ipv6: "false"
@@ -420,8 +457,8 @@ networks:
         with open("docker-compose.dev.yml", "w") as f:
             f.write(docker_dev_content)
 
-        dockerfile_dev_content="""\
-# Use Node.js 20.11.0-alpine as the base image
+        dockerfile_dev_content=f"""\
+# Use Node.js 20.11.0-bullseye as the base image
 FROM node:20.11.0-bullseye
 
 # Set authors label
@@ -430,51 +467,65 @@ LABEL authors="Your name"
 # Set the working directory
 WORKDIR /usr/local/app
 
-# Copy only package files to install dependencies
-COPY ./app/package*.json ./
+# Copy package.json and package-lock.json to install dependencies
+COPY package*.json ./
 
 # Install npm and Angular CLI globally
-RUN npm install -g npm@10.4.0 @angular/cli && \
-    npm install
+RUN npm install -g npm@10.4.0 @angular/cli
+
+# Install project dependencies
+RUN npm install
+
+# Copy the rest of the application code
+COPY . .
+
+# Add node_modules/.bin to PATH
+ENV PATH /usr/local/app/node_modules/.bin:$PATH
 
 # Expose the port for Angular
 EXPOSE 4200
 
 # Start the Angular development server
 CMD ["ng", "serve", "--host", "0.0.0.0", "--disable-host-check"]
+
 """
         with open("Dockerfile", "w") as f:
             f.write(dockerfile_dev_content)
-        typer.secho("Docker Dev Setup craeted.")
-
-        build_name=f"{repo_name}:latest"
+        typer.secho("Docker Dev Setup created.")
 
         subprocess.run(["docker", "build", "-t", build_name, "."])
-        subprocess.run(["docker", "compose", "docker-compose.dev.yml", "up", "-d"])
-        typer.echo("Waiting for 60 seconds...")
-        time.sleep(60)  # Pause the program for 60 seconds
-        subprocess.run(["docker", "compose", "docker-compose.dev.yml", "down"])
+       # time.sleep(30)
+        typer.secho("Docker build executed")
 
-        docker_dev_file = f"{repo_name}/docker-compose.dev.yml"
+        subprocess.run(["docker", "compose", "-f",  "docker-compose.dev.yml", "up", "-d"])
+        typer.echo("Waiting for 20 seconds...")
+        time.sleep(20)  # Pause the program for 60 seconds
+        subprocess.run(["docker", "compose", "-f",  "docker-compose.dev.yml", "down"])
+
+        current_path = get_current_path()
+        print(f"The current working directory is: {current_path}")
+
+        docker_dev_file = Path(f"{current_path}/docker-compose.dev.yml")
+
         try:
             docker_dev_file.unlink()
-            typer.echo(f"File '{docker_dev_file}' has beemn deleted.")
+            typer.echo(f"File '{docker_dev_file}' has been deleted.")
         except Exception as e:
             typer.echo(f"Error: File not deleted. Reason: {e}")
             raise typer.Exit(code=1)
 
         typer.echo("Continuing with the setup...")
 
-        docker_dev2_content="""\
+        docker_dev2_content=f"""\
 services:
-  angular-project:
-    image: angular-project:latest
+  {repo_name}:
+    image: {build_name}
     volumes:
-      - ./ai-internal_yggdrasil_sw/app:/usr/local/app
+      - ./:/usr/local/app
     ports:
       - "4200:4200"
     command: ["ng", "serve", "--host", "0.0.0.0", "--disable-host-check"]
-    container_name: angular-project
+    container_name: {repo_name}
     restart: unless-stopped
     networks:
       frontproxy_fnet:
@@ -489,7 +540,7 @@ networks:
   frontproxy_fnet:
     external: true
   backend:
-    name: angular-project_backend
+    name: {repo_name}_backend
     driver: bridge
     driver_opts:
       com.docker.network.enable_ipv6: "false"
@@ -497,7 +548,7 @@ networks:
         with open("docker-compose.dev.yml", "w") as f:
             f.write(docker_dev2_content)
 
-        subprocess.run(["docker", "compose", "docker-compose.dev.yml", "up", "-d"])
+        subprocess.run(["docker", "compose", "-f",  "docker-compose.dev.yml", "up", "-d"])
         typer.secho("Docker Dev Setup successfull")
 
 
