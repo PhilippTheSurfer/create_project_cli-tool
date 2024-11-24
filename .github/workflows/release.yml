@@ -44,7 +44,7 @@ jobs:
           echo "Building the package..."
           python setup.py sdist bdist_wheel
           echo "Current dir content:"
-          ls -l
+          ls -l dist
 
       - name: Create Release
         uses: ncipollo/release-action@v1
