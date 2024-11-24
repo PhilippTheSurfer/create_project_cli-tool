@@ -50,4 +50,4 @@ jobs:
         uses: ncipollo/release-action@v1
         with:
           tag: ${{ github.ref_name }}
-          artifacts: project_cli.tar.gz, project_cli.whl
+          artifacts: /dist/project_cli.tar.gz, /dist/project_cli.whl
